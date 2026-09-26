@@ -13,7 +13,7 @@ initialVelocity = 0; % Initial velocity [m/s]
 %% Time domain
 
 tMax = 30; % Simulation time [s]
-numCollocation = 1000; % Number of collocation points
+numCollocation = 100; % Number of collocation points
 t = linspace(0, tMax, numCollocation);
 t = dlarray(t, "CB");
 t0 = dlarray(0, "CB");
@@ -22,11 +22,15 @@ t0 = dlarray(0, "CB");
 
 layers = [
     featureInputLayer(1)
-    fullyConnectedLayer(32)
+    fullyConnectedLayer(25)
     tanhLayer
-    fullyConnectedLayer(32)
+    fullyConnectedLayer(25)
     tanhLayer
-    fullyConnectedLayer(32)
+    fullyConnectedLayer(25)
+    tanhLayer
+    fullyConnectedLayer(25)
+    tanhLayer
+    fullyConnectedLayer(25)
     tanhLayer
     fullyConnectedLayer(1)
 ];
@@ -34,17 +38,22 @@ layers = [
 net = dlnetwork(layers);
 
 %% Noisy data generation
-[xData, tData] = noisyDataGenerator(tMax, 50, 0.002, m, c, k, initialDisplacement, initialVelocity);
+dataPoints = 50;
+noiseLevel = 0.002;
+[xData, tData] = noisyDataGenerator(tMax, dataPoints, noiseLevel, m, c, k, initialDisplacement, initialVelocity);
 
 %% Training Parameters
 
-numIterations = 1000;
+numIterations = 20000;
 learningRate = 1e-3;
 trailingAvg = [];
 trailingAvgSq = [];
 lossHistory = zeros(numIterations, 1);
 lambdaPhysics = 1;
-lambdaData = 0;
+lambdaData = 1000000;
+lbfgsState = [];
+
+
 %% Training
 
 for iteration = 1:numIterations
@@ -54,8 +63,9 @@ for iteration = 1:numIterations
 
     [net, trailingAvg, trailingAvgSq] = adamupdate(net, gradients, trailingAvg, trailingAvgSq, iteration, learningRate);
 
+    
     lossHistory(iteration) = extractdata(loss);
-
+    
     if mod(iteration,100) == 0
 
         fprintf("Iteration %d\n", iteration);
@@ -68,6 +78,14 @@ for iteration = 1:numIterations
 
 end
 
+
+%% Load trained network
+%{
+
+load("trainedPINN.mat");
+ 
+%}
+
 figure
 
 semilogy(lossHistory)
@@ -77,6 +95,13 @@ grid on
 xlabel("Iteration")
 ylabel("Loss")
 title("PINN training")
+%% Saving network
+
+scriptPath = fileparts(mfilename("fullpath"));
+save(fullfile(scriptPath, "trainedPINN.mat"), ...
+"net", "lossHistory", "iteration", "learningRate", "lambdaPhysics", ...
+"lambdaData", "m", "c", "k", "initialDisplacement", "initialVelocity", ...
+"numCollocation", "tMax");
 
 %% Test
 

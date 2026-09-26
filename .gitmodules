@@ -1,3 +1,6 @@
 [submodule "Patrik_Onlab1/Onlab1"]
 	path = Patrik_Onlab1/Onlab1
 	url = https://github.com/PaRIK22/Onlab1
+[submodule "Patrik_Onlab2/Onlab2"]
+	path = Patrik_Onlab2/Onlab2
+	url = https://github.com/PaRIK22/Onlab2
