@@ -2,18 +2,21 @@ clear;
 clc;
 close all;
 
-%% Physical Parameters
+scriptPath = fileparts(mfilename("fullpath"));
+addpath(fullfile(fileparts(scriptPath), "Functions"));
 
+%% Physical Parameters
+ 
 m = 1.0; % Mass[kg]
-c = 0.5; % Damping coefficient [Ns/m]
-k = 2.0; % Spring stiffness [N/m]
+c = 0.25; % Damping coefficient [Ns/m]
+k = 1.0; % Spring stiffness [N/m]
 initialDisplacement = 0.1; % Initial displacement [m]
 initialVelocity = 0; % Initial velocity [m/s]
 
 %% Time domain
 
 tMax = 30; % Simulation time [s]
-numCollocation = 100; % Number of collocation points
+numCollocation = 50; % Number of collocation points
 t = linspace(0, tMax, numCollocation);
 t = dlarray(t, "CB");
 t0 = dlarray(0, "CB");
@@ -39,36 +42,44 @@ net = dlnetwork(layers);
 
 %% Noisy data generation
 dataPoints = 50;
-noiseLevel = 0.002;
+noiseLevel = 0.02;
 [xData, tData] = noisyDataGenerator(tMax, dataPoints, noiseLevel, m, c, k, initialDisplacement, initialVelocity);
 
 %% Training Parameters
 
-numIterations = 20000;
+numAdamIterations = 6000;
 learningRate = 1e-3;
 trailingAvg = [];
 trailingAvgSq = [];
-lossHistory = zeros(numIterations, 1);
 lambdaPhysics = 1;
-lambdaData = 1000000;
-lbfgsState = [];
+lambdaData = 1;
+
+numLBFGSIterations = 200;
+lbfgsState = lbfgsState(HistorySize = 20);
+
+lossHistoryAdam = zeros(numAdamIterations, 1);
+lossHistoryLBFGS = zeros(numLBFGSIterations, 1);
 
 
+
+ 
 %% Training
 
-for iteration = 1:numIterations
+trainingTimer = tic;
+
+for iteration = 1:numAdamIterations
 
     [loss, gradients, physicsLoss, initialConditionLoss, dataLoss] = ...
     dlfeval(@modelLoss, net, t, t0, tData, xData, m, c, k, initialDisplacement, initialVelocity, lambdaPhysics, lambdaData);
 
     [net, trailingAvg, trailingAvgSq] = adamupdate(net, gradients, trailingAvg, trailingAvgSq, iteration, learningRate);
 
-    
-    lossHistory(iteration) = extractdata(loss);
-    
+
+    lossHistoryAdam(iteration) = extractdata(loss);
+
     if mod(iteration,100) == 0
 
-        fprintf("Iteration %d\n", iteration);
+        fprintf("Adam Iteration %d\n", iteration);
         fprintf("  Total loss   = %.6e\n", extractdata(loss));
         fprintf("  Physics loss = %.6e\n", extractdata(physicsLoss));
         fprintf("  IC loss      = %.6e\n", extractdata(initialConditionLoss));
@@ -78,30 +89,59 @@ for iteration = 1:numIterations
 
 end
 
+lossFcn = @(net) dlfeval(@modelLoss, net, t, t0, tData, xData, m, c, k, initialDisplacement, initialVelocity, lambdaPhysics, lambdaData);
 
-%% Load trained network
-%{
+for iteration = 1:numLBFGSIterations
 
-load("trainedPINN.mat");
- 
-%}
+    [net, lbfgsState] = lbfgsupdate(net, lossFcn, lbfgsState);
+
+
+    [loss, ~, physicsLoss, initialConditionLoss, dataLoss] = dlfeval(@modelLoss, net, t, t0, tData, xData, m, c, k, initialDisplacement, initialVelocity, lambdaPhysics, lambdaData);
+
+    lossHistoryLBFGS(iteration) = extractdata(loss);
+
+    if mod(iteration, 100) == 0
+
+        fprintf("L-BFGS Iteration %d\n", iteration);
+        fprintf("  Total loss   = %.6e\n", extractdata(loss));
+        fprintf("  Physics loss = %.6e\n", extractdata(physicsLoss));
+        fprintf("  IC loss      = %.6e\n", extractdata(initialConditionLoss));
+        fprintf("  Data loss    = %.6e\n", extractdata(dataLoss));
+
+    end
+end
+
+trainingTimeSeconds = toc(trainingTimer);
+fprintf("Training time: %.2f seconds\n", trainingTimeSeconds);
+
+
+%% Loss plot
+
+
+lossHistory = [lossHistoryAdam; lossHistoryLBFGS];
 
 figure
 
-semilogy(lossHistory)
+semilogy(1:length(lossHistoryAdam), ...
+    lossHistoryAdam, ...
+    "LineWidth",2)
+
+hold on
+
+semilogy( ...
+    length(lossHistoryAdam)+(1:length(lossHistoryLBFGS)), ...
+    lossHistoryLBFGS, ...
+    "LineWidth",2)
+
+xline(length(lossHistoryAdam), "--", "Adam -> L-BFGS");
 
 grid on
 
 xlabel("Iteration")
 ylabel("Loss")
-title("PINN training")
-%% Saving network
+legend("Adam","L-BFGS")
 
-scriptPath = fileparts(mfilename("fullpath"));
-save(fullfile(scriptPath, "trainedPINN.mat"), ...
-"net", "lossHistory", "iteration", "learningRate", "lambdaPhysics", ...
-"lambdaData", "m", "c", "k", "initialDisplacement", "initialVelocity", ...
-"numCollocation", "tMax");
+title("PINN Training Loss")
 
 %% Test
 
@@ -130,6 +170,15 @@ odeFunction = @(t,x) [
     ];
 
 [tODE,xODE] = ode45( odeFunction, [0 tMax], [initialDisplacement initialVelocity]);
+
+%% Save data for plotting
+
+save(fullfile(scriptPath, "ADAMandLBFGSpartlytrained.mat"), ...
+    "net", "lossHistory", "lossHistoryAdam", "lossHistoryLBFGS", ...
+    "learningRate", "lambdaPhysics", "lambdaData", ...
+    "m", "c", "k", "initialDisplacement", "initialVelocity", ...
+    "numCollocation", "tMax", "trainingTimeSeconds", ...
+    "tData", "xData", "tTest", "xPINN", "tODE", "xODE");
 
 figure
 
