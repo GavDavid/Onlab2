@@ -47,14 +47,17 @@ noiseLevel = 0.02;
 
 %% Training Parameters
 
-numAdamIterations = 6000;
-learningRate = 1e-3;
+numAdamIterations = 20000;
+learningRateFirst = 1e-2;
+learningRateSecond = 1e-3;
+learningrateThird = 1e-4;
+learningrateFourth = 1e-5;
 trailingAvg = [];
 trailingAvgSq = [];
 lambdaPhysics = 1;
 lambdaData = 1;
 
-numLBFGSIterations = 200;
+numLBFGSIterations = 100;
 lbfgsState = lbfgsState(HistorySize = 20);
 
 lossHistoryAdam = zeros(numAdamIterations, 1);
@@ -68,7 +71,15 @@ lossHistoryLBFGS = zeros(numLBFGSIterations, 1);
 trainingTimer = tic;
 
 for iteration = 1:numAdamIterations
-
+    if iteration <= numAdamIterations/4
+        learningRate = learningRateFirst;
+    elseif iteration <= numAdamIterations/2
+        learningRate = learningRateSecond;
+    elseif iteration <= 3*numAdamIterations/4
+        learningRate = learningrateThird;
+    else
+        learningRate = learningrateFourth;
+    end
     [loss, gradients, physicsLoss, initialConditionLoss, dataLoss] = ...
     dlfeval(@modelLoss, net, t, t0, tData, xData, m, c, k, initialDisplacement, initialVelocity, lambdaPhysics, lambdaData);
 
@@ -173,7 +184,7 @@ odeFunction = @(t,x) [
 
 %% Save data for plotting
 
-save(fullfile(scriptPath, "ADAMandLBFGSpartlytrained.mat"), ...
+save(fullfile(scriptPath, "lepcsosADAMwithLBFGS.mat"), ...
     "net", "lossHistory", "lossHistoryAdam", "lossHistoryLBFGS", ...
     "learningRate", "lambdaPhysics", "lambdaData", ...
     "m", "c", "k", "initialDisplacement", "initialVelocity", ...
