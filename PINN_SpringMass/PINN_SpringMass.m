@@ -8,14 +8,14 @@ addpath(fullfile(fileparts(scriptPath), "Functions"));
 %% Physical Parameters
  
 m = 1.0; % Mass[kg]
-c = 0.25; % Damping coefficient [Ns/m]
-k = 1.0; % Spring stiffness [N/m]
+c = 0.5; % Damping coefficient [Ns/m]
+k = 1.5; % Spring stiffness [N/m]
 initialDisplacement = 0.1; % Initial displacement [m]
 initialVelocity = 0; % Initial velocity [m/s]
 
 %% Time domain
 
-tMax = 30; % Simulation time [s]
+tMax = 15; % Simulation time [s]
 numCollocation = 50; % Number of collocation points
 t = linspace(0, tMax, numCollocation);
 t = dlarray(t, "CB");
@@ -25,15 +25,11 @@ t0 = dlarray(0, "CB");
 
 layers = [
     featureInputLayer(1)
-    fullyConnectedLayer(25)
+    fullyConnectedLayer(16)
     tanhLayer
-    fullyConnectedLayer(25)
+    fullyConnectedLayer(16)
     tanhLayer
-    fullyConnectedLayer(25)
-    tanhLayer
-    fullyConnectedLayer(25)
-    tanhLayer
-    fullyConnectedLayer(25)
+    fullyConnectedLayer(16)
     tanhLayer
     fullyConnectedLayer(1)
 ];
@@ -42,22 +38,22 @@ net = dlnetwork(layers);
 
 %% Noisy data generation
 dataPoints = 50;
-noiseLevel = 0.02;
+noiseLevel = 0.01;
 [xData, tData] = noisyDataGenerator(tMax, dataPoints, noiseLevel, m, c, k, initialDisplacement, initialVelocity);
 
 %% Training Parameters
 
-numAdamIterations = 20000;
-learningRateFirst = 1e-2;
+numAdamIterations = 2000;
+learningRateFirst = 1e-3;
 learningRateSecond = 1e-3;
-learningrateThird = 1e-4;
-learningrateFourth = 1e-5;
+learningRateThird = 1e-3;
+learningRateFourth = 1e-3;
 trailingAvg = [];
 trailingAvgSq = [];
-lambdaPhysics = 1;
+lambdaPhysics = 5;
 lambdaData = 1;
 
-numLBFGSIterations = 100;
+numLBFGSIterations = 0;
 lbfgsState = lbfgsState(HistorySize = 20);
 
 lossHistoryAdam = zeros(numAdamIterations, 1);
@@ -76,9 +72,9 @@ for iteration = 1:numAdamIterations
     elseif iteration <= numAdamIterations/2
         learningRate = learningRateSecond;
     elseif iteration <= 3*numAdamIterations/4
-        learningRate = learningrateThird;
+        learningRate = learningRateThird;
     else
-        learningRate = learningrateFourth;
+        learningRate = learningRateFourth;
     end
     [loss, gradients, physicsLoss, initialConditionLoss, dataLoss] = ...
     dlfeval(@modelLoss, net, t, t0, tData, xData, m, c, k, initialDisplacement, initialVelocity, lambdaPhysics, lambdaData);
@@ -184,7 +180,7 @@ odeFunction = @(t,x) [
 
 %% Save data for plotting
 
-save(fullfile(scriptPath, "lepcsosADAMwithLBFGS.mat"), ...
+save(fullfile(scriptPath, "asd.mat"), ...
     "net", "lossHistory", "lossHistoryAdam", "lossHistoryLBFGS", ...
     "learningRate", "lambdaPhysics", "lambdaData", ...
     "m", "c", "k", "initialDisplacement", "initialVelocity", ...

@@ -5,7 +5,7 @@ close all;
 %% Load saved data
 
 scriptPath = fileparts(mfilename("fullpath"));
-dataFile = fullfile(scriptPath, "ADAMandLBFGS.mat");
+dataFile = fullfile(scriptPath, "asd.mat");
 
 if ~isfile(dataFile)
     error("PINN_SpringMass_Plotter:MissingDataFile", ...
