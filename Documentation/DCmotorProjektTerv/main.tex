@@ -1,0 +1,458 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[utf8]{inputenc}
+  \usepackage[T1]{fontenc}
+  \usepackage{lmodern}
+\else
+  \usepackage{fontspec}
+  \setmainfont{Times New Roman}
+\fi
+\usepackage[magyar]{babel}
+\usepackage{microtype}
+\usepackage[a4paper,margin=25mm,headheight=14pt]{geometry}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs,longtable,array,tabularx}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{url}
+\providecommand*{\theHpage}{\thepage}
+
+\definecolor{navy}{HTML}{17324D}
+\definecolor{teal}{HTML}{087E8B}
+\definecolor{lightblue}{HTML}{EDF4F8}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=navy,
+  urlcolor=teal,
+  citecolor=navy,
+  pdftitle={DC motor elektromechanikai modelljének PINN-alapú vizsgálata},
+  pdfauthor={Projektterv}
+}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlist{itemsep=2pt,topsep=3pt}
+\setlength{\emergencystretch}{2em}
+\renewcommand{\arraystretch}{1.15}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{DC motor PINN projekt}
+\fancyhead[R]{Műszaki dokumentáció}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\vect}[1]{\boldsymbol{#1}}
+\newcommand{\unit}[1]{\,\mathrm{#1}}
+\newcommand{\RMSE}{\mathrm{RMSE}}
+\newcommand{\MAE}{\mathrm{MAE}}
+
+\begin{document}
+
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+\centering
+\vspace*{18mm}
+{\Large\color{teal} PROJEKTDOKUMENTÁCIÓ\par}
+\vspace{12mm}
+{\huge\bfseries\color{navy} Egyenáramú motor\\[2mm] elektromechanikai modelljének\\[2mm] PINN-alapú vizsgálata\par}
+\vspace{9mm}
+{\Large Fizikai modell, állapotbecslés és rendszerazonosítás\par}
+\vspace{20mm}
+\begin{minipage}{0.83\textwidth}
+\large
+A dokumentum egy állandómágneses, kefés DC motor fokozatos PINN-vizsgálatának mérnöki tervét rögzíti. A központi kérdés az, hogy a mérési adatok és a fizikai egyenletek együttes használata miként segítheti az állapotok, a motorparaméterek és az ismeretlen terhelőnyomaték becslését.
+\end{minipage}
+\vfill
+{\large 2026. november 3.\par}
+\vspace{5mm}
+\end{titlepage}
+
+\hypersetup{pageanchor=true}
+\pagenumbering{roman}
+\renewcommand*{\theHpage}{roman.\roman{page}}
+\tableofcontents
+\newpage
+\pagenumbering{arabic}
+\renewcommand*{\theHpage}{arabic.\arabic{page}}
+
+\section{Összefoglaló és célkitűzés}
+
+A projekt célja egy időfüggő, elektromechanikailag csatolt rendszer vizsgálata fizikai információt felhasználó neurális hálózattal (physics-informed neural network, PINN). A kiinduló rendszer egy állandómágneses, kefés DC motor. A modell az armatúraáram, a szögsebesség és a tengelyhelyzet dinamikáját kapcsolja össze a kapocsfeszültséggel és a külső terhelőnyomatékkal.
+
+A fejlesztés fokozatos: először ismert paraméterekkel készül előrejelző modell, majd következik a paraméterazonosítás, a ritka mérésekből történő állapotbecslés, az ismeretlen terhelés rekonstruálása, végül a zajjal, modellhibával és korábban nem látott gerjesztésekkel szembeni robusztusság vizsgálata. A referenciaadatok elsődleges forrása MATLAB/Simulink szimuláció, amely kontrollált igazságadatot ad. Ezt egészítheti ki egy nyilvános, kísérleti DC motor adatbázis; az adatbázisban ténylegesen elérhető jeleket és mértékegységeket a letöltött fájlok alapján kell véglegesíteni.
+
+A projekt eredménye nem pusztán egy előrejelző hálózat, hanem összehasonlítható kísérletsorozat: megmutatja, hogy a fizikai veszteségtag mikor javítja az állapotbecslést és az általánosítást, mely paraméterek azonosíthatók a választott gerjesztésekkel, valamint hol jelentkeznek a modell és a mérési adatok korlátai.
+
+\section{Hatókör, rendszerhatár és jelölések}
+
+\subsection{Vizsgált rendszer}
+
+A rendszerhatár a motor armatúrakörét, a forgórészt, a tengelyre redukált tehetetlenséget és az ezekre ható külső terhelést tartalmazza. A bemenet az armatúra kapocsfeszültsége. Az alapállapot-vektor:
+\begin{equation}
+  \vect{x}(t)=
+  \begin{bmatrix}
+    i(t) & \omega(t) & \theta(t)
+  \end{bmatrix}^{\mathsf T},
+  \label{eq:state}
+\end{equation}
+ahol az állapotok rendre az armatúraáram, a szögsebesség és a tengely szöghelyzete. Az alapbemenet $u_a(t)$, az ismeretlen vagy ismert zavaró bemenet pedig a terhelőnyomaték $M_L(t)$.
+
+\subsection{Jelölésrendszer}
+
+\small
+\renewcommand{\arraystretch}{1.0}
+\setlength{\parskip}{0pt}
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.23\textwidth} >{\raggedright\arraybackslash}p{0.70\textwidth}}
+\toprule
+Jelölés & Jelentés és SI-mértékegység \\
+\midrule
+\endhead
+$t$ & Idő, $\unit{s}$.\\
+$u_a$ & Armatúra kapocsfeszültsége, $\unit{V}$.\\
+$i$ & Armatúraáram, $\unit{A}$.\\
+$R$ & Armatúraellenállás, $\unit{\Omega}$.\\
+$L$ & Armatúrainduktivitás, $\unit{H}$.\\
+$e_b$ & Visszaindukált feszültség, $\unit{V}$.\\
+$k_e$ & Visszaindukált feszültség állandója, $\unit{V\,s\,rad^{-1}}$.\\
+$k_t$ & Nyomatékállandó, $\unit{N\,m\,A^{-1}}$.\\
+$M_m$ & Elektromágneses motor-nyomaték, $\unit{N\,m}$.\\
+$M_L$ & Külső terhelőnyomaték, $\unit{N\,m}$.\\
+$J$ & Egyenértékű tengely-tehetetlenségi nyomaték, $\unit{kg\,m^2}$.\\
+$b$ & Viszkózus súrlódási tényező, $\unit{N\,m\,s\,rad^{-1}}$.\\
+$\omega$ & Szögsebesség, $\unit{rad\,s^{-1}}$.\\
+$\theta$ & Szöghelyzet, $\unit{rad}$.\\
+$\alpha=\dot\omega$ & Szöggyorsulás, $\unit{rad\,s^{-2}}$.\\
+$\hat{z}$, $z$ & Becsült, illetve referenciaérték.\\
+\bottomrule
+\end{longtable}
+\normalsize
+\renewcommand{\arraystretch}{1.15}
+\setlength{\parskip}{5pt}
+
+A pont a teljes idő szerinti deriváltat jelöli, például $\dot{i}=\dd i/\dd t$. A pozitív forgásirányban a motor nyomatéka gyorsítja a rendszert, a pozitív $M_L$ pedig ezzel ellentétes, fékező nyomatékként szerepel. A szögsebességet radián per másodpercben kell használni; ha a forrás fordulatszámot ad meg, akkor
+\begin{equation}
+  \omega = \frac{2\pi}{60}n,
+  \label{eq:rpm}
+\end{equation}
+ahol $n$ a percenkénti fordulatszám.
+
+\section{A fizikai DC motor modellje}
+
+\subsection{Armatúra feszültségegyenlete}
+
+Az armatúrakört soros $R$--$L$ tag és a forgás miatt keletkező ellenfeszültség írja le. A Kirchhoff-féle huroktörvény szerint
+\begin{equation}
+  u_a(t)=R\,i(t)+L\frac{\dd i(t)}{\dd t}+e_b(t),
+  \label{eq:armature}
+\end{equation}
+ahol az állandómágneses motor lineáris tartományában
+\begin{equation}
+  e_b(t)=k_e\,\omega(t).
+  \label{eq:backemf}
+\end{equation}
+Ebből az áram állapotegyenlete:
+\begin{equation}
+  \dot{i}(t)=\frac{u_a(t)-R\,i(t)-k_e\omega(t)}{L}.
+  \label{eq:idot}
+\end{equation}
+Az $Ri$ tag az ellenálláson eső feszültség, az $L\dot{i}$ az áramváltozáshoz szükséges induktív feszültség, a $k_e\omega$ pedig a forgás által indukált, a táplálással szemben ható feszültség.
+
+\subsection{Elektromágneses nyomaték}
+
+A motor nyomatéka a mágneses tér és az armatúraáram kölcsönhatásából származik. A lineáris modellben
+\begin{equation}
+  M_m(t)=k_t\,i(t).
+  \label{eq:torque}
+\end{equation}
+Állandómágneses DC motor esetében, következetes SI-egységekkel, a teljesítményátalakítási kapcsolat $e_b i=M_m\omega$ alapján $k_e$ és $k_t$ számértéke azonos. Az összefüggés csak azonos definíció és SI-egységek mellett alkalmazható; adatlapokban a fordulatszám más egységben szerepelhet, ezért a konverziót ellenőrizni kell. A kezdeti vizsgálatban a két állandó külön becsülhető, később pedig az egyenlőség fizikailag indokolt kötésként is bevezethető.
+
+\subsection{Mechanikai dinamika és pozíció}
+
+A forgómozgás Newton-törvénye szerint az eredő nyomaték egyenlő a tehetetlenség és a szöggyorsulás szorzatával. Viszkózus súrlódást és külső terhelőnyomatékot figyelembe véve:
+\begin{equation}
+  J\dot{\omega}(t)=M_m(t)-b\omega(t)-M_L(t).
+  \label{eq:mechanics}
+\end{equation}
+A sebesség és a pozíció kinematikai kapcsolata:
+\begin{equation}
+  \dot{\theta}(t)=\omega(t).
+  \label{eq:position}
+\end{equation}
+Ezekből a mechanikai állapotegyenlet:
+\begin{equation}
+  \dot{\omega}(t)=\frac{k_t i(t)-b\omega(t)-M_L(t)}{J}.
+  \label{eq:omegadot}
+\end{equation}
+A teljes, háromállapotú modell tehát
+\begin{equation}
+\boxed{
+\begin{aligned}
+  \dot{i} &= \frac{u_a-Ri-k_e\omega}{L},\\
+  \dot{\omega} &= \frac{k_t i-b\omega-M_L}{J},\\
+  \dot{\theta} &= \omega.
+\end{aligned}}
+\label{eq:fullmodel}
+\end{equation}
+A terhelés lehet ismert bemeneti jel, becsülendő ismeretlen vagy a kezdeti kísérletekben nulla. A pozíció egy integráló állapot; ha az adatforrás csak fordulatszámot közöl, a pozíció közvetlen mérési veszteségtagja elhagyható, de a kinematikai egyenlet továbbra is használható.
+
+\subsection{Alapfeltevések és érvényességi tartomány}
+
+Az alapmodell a következő egyszerűsítéseket teszi:
+
+\begin{itemize}
+  \item állandómágneses, kefés DC motor, közel állandó mágneses fluxussal;
+  \item állandó $R$, $L$, $k_e$, $k_t$, $J$ és $b$ egy-egy vizsgált kísérleten belül;
+  \item merev tengely, a motor és a terhelés tehetetlensége egyetlen $J$ paraméterbe redukálva;
+  \item lineáris, sebességgel arányos viszkózus súrlódás;
+  \item az armatúrafeszültség a tényleges motor kapcsain értendő, nem automatikusan a PWM parancs;
+  \item kefefeszültség, telítődés, fogazási nyomatéklüktetés, holtjáték és hőmérsékletfüggés az első modellben elhanyagolva.
+\end{itemize}
+
+Ezek nem univerzális igazságok: a mérési adatokkal ellenőrizendő modellezési feltevések. Ha a kis sebességű eltérések jelentősek, a Coulomb-súrlódás például $M_c\operatorname{sgn}(\omega)$ taggal bővítheti az egyenletet; ezt csak az alapmodell validálása után célszerű bevezetni.
+
+\section{A PINN feladatai}
+
+A PINN egy folytonos időfüggvényt közelít a hálózattal, majd automatikus deriválással kiértékeli a differenciálegyenletek maradékát. A mért adatok a tényleges kimenetekhez kötik a becslést, a fizikai egyenletek pedig a mintavételi pontok közötti viselkedést is korlátozzák.
+
+\subsection{Előreirányú feladat (forward problem)}
+
+Ismert $R,L,k_e,k_t,J,b$, ismert $u_a(t)$, ismert vagy rögzített $M_L(t)$ és kezdeti állapot mellett a hálózat az
+\[
+  t \longmapsto
+  \begin{bmatrix}\hat{i}(t)&\hat{\omega}(t)&\hat{\theta}(t)\end{bmatrix}^{\mathsf T}
+\]
+leképezést tanulja. Ez az első lépcső: a cél az ismert paraméterű referencia-ODE reprodukálása. Először sűrű szimulációs megfigyelésekkel érdemes összevetni egy hagyományos numerikus ODE-megoldót; csak ezután csökkentsük a mért pontok számát.
+
+\subsection{Inverz feladat és paraméterazonosítás}
+
+Az inverz feladatban a fizikai paraméterek egy részét az adatokból kell becsülni. Például:
+\begin{equation}
+  \vect{p}=
+  \begin{bmatrix}R&L&k_e&k_t&J&b\end{bmatrix}^{\mathsf T}.
+\end{equation}
+A hálózati súlyok mellett a kiválasztott paraméterek is tanítható változók. Pozitivitásuk biztosítható például $p=\exp(q)$ parametrizálással. Nem cél minden paramétert minden kísérletből egyszerre becsülni: a paraméterek összefüggése és a gerjesztés információtartalma korlátozhatja az egyértelmű azonosíthatóságot. Kezdetben célszerű egyes paramétereket adatlapból vagy külön mérésből rögzíteni, és csak néhány, jól gerjesztett paramétert becsülni.
+
+\subsection{Állapotbecslés ritka vagy zajos mérésekből}
+
+A hálózat azokat az állapotokat is folytonosan becsülheti, amelyeket csak ritkán vagy zajosan mérünk. Például mérhető lehet a fordulatszám és az áram, miközben a tanítás során csak ezek egy részét használjuk fel; a fizikai modell segíthet az időközi állapot rekonstruálásában. A pozíció becsülhető a $\dot{\theta}=\omega$ kapcsolatból, de az integrálási drift miatt a kezdeti pozíció rögzítése vagy időnkénti pozíciómérés fontos lehet.
+
+Ez a feladat nem azonos az extrapolációval: az időtartományon belüli ritka minták közötti interpoláció általában könnyebb, mint korábban nem látott bemeneti profil vagy üzemi tartomány előrejelzése.
+
+\subsection{Ismeretlen terhelőnyomaték becslése}
+
+A mechanikai maradékból az ismeretlen terhelés formálisan kifejezhető:
+\begin{equation}
+  M_L(t)=k_t i(t)-b\omega(t)-J\dot{\omega}(t).
+  \label{eq:loadformal}
+\end{equation}
+A közvetlen differenciálás zajérzékeny, ezért a PINN inkább együtt tanulja $\omega(t)$ sima reprezentációját és $M_L(t)$-t. A terhelés közelíthető külön neurális kimenettel, simító szplájnnal vagy intervallumonként állandó értékkel. A választás a terhelés fizikai jellegétől függjön: lépcsős terhelésre nem célszerű túl erős simasági büntetést alkalmazni.
+
+A terhelés, a tehetetlenség és a súrlódás egyidejű becslése könnyen több, hasonlóan jó magyarázatot eredményezhet. Ezért a szimulációban ismert terhelési profilokkal kell demonstrálni a módszert, a valós adatokon pedig csak azonosítható paraméterkészletet szabad becsültnek tekinteni.
+
+\section{Adatforrás-stratégia}
+
+\subsection{Nyilvános kísérleti adatbázis}
+
+A beszélgetésben kiválasztott kiinduló forrás a Mendeley Data OpenMCT DC motor adatkészlete. A jelenlegi, 2. verziójú rekord leírása 14 nyers adatfelvételt, több mint 60\,000 mintasort, motorsebességet, referenciajelet, szabályozási periódust, áramérzékelő nyers és szűrt jeleit, PWM működtetőjelet, valamint egyes kísérletekben szinkronizált digitális multiméteres árammérést sorol fel. A leírás APRBS rendszerazonosító gerjesztéseket, több mintavételi időt, PI-szabályozási méréseket, chirp gerjesztést, MATLAB szkripteket és feldolgozott MAT fájlokat is említ. Az adathalmaz CC BY 4.0 licencet jelez \cite{mendeley}.
+
+A leírás alapján az adatkészlet hasznos lehet fordulatszám- és áramállapot-becsléshez, rendszerazonosítási gerjesztések összehasonlításához és valós méréseken végzett robusztussági próbához. A nyilvános leírás azonban nem igazolja, hogy minden futamban közvetlenül elérhető a motor kapocsfeszültsége, a tengely szöghelyzete vagy a külső terhelőnyomaték. Ezért a letöltés után kötelező az oszlopok, egységek, mintavételi idők, kalibráció és fájlverzió ellenőrzése.
+
+Különösen fontos különbséget tenni a PWM parancs és a tényleges $u_a(t)$ kapocsfeszültség között. Ha csak PWM kitöltési tényező áll rendelkezésre, az armatúrafeszültséghez ismerni kell többek között a DC sín feszültségét és a meghajtó veszteségeit. Ezek hiányában a feszültség csak becsült bemenetként kezelhető, és az ebből számított paraméterek bizonytalanságát jelezni kell.
+
+\subsection{MATLAB/Simulink szimuláció}
+
+A Simulink-modell elsődleges célja ellenőrizhető referenciaadat és igazságértékek előállítása. A szimulációban minden állapot, paraméter és terhelés ismert, ezért külön mérhető a hálózat előrejelzési és azonosítási hibája. Javasolt gerjesztések:
+
+\begin{itemize}
+  \item lépcsős és többlépcsős feszültségprofilok az indítási és állandósult válasz vizsgálatára;
+  \item APRBS vagy PRBS gerjesztés a szélesebb frekvenciatartományú azonosításhoz;
+  \item szinuszos vagy chirp feszültségprofil;
+  \item ismert lépcsős vagy szakaszonként változó terhelőnyomaték;
+  \item zajjal, ritkább mintavételezéssel és szenzoreltolással módosított mérési változatok.
+\end{itemize}
+
+A gerjesztések amplitúdóját a kiválasztott motor megengedett üzemi tartományához kell igazítani. Minden adatsorhoz együtt kell tárolni a paramétereket, kezdeti állapotokat, bemeneti profilokat, solver-beállításokat, mintavételi időt és az esetleges zajmodell magját.
+
+\subsection{Hibrid adatfolyam}
+
+A javasolt sorrend: (1) PINN és numerikus megoldó ellenőrzése szimulációval; (2) az adatbázis jeleinek auditja és adatelőkészítés; (3) külön mérési futamokon validált tanítás; (4) szimuláció és mérés eredményeinek összevetése; (5) a szimulált modell eltérésének tudatos vizsgálata. A szimulált és valós adatokat nem szabad automatikusan egyetlen tanítóhalmazba összekeverni: a modell- és érzékelőkülönbségeket előbb külön kell mérni.
+
+Az adatok felosztása lehetőleg teljes kísérleti futamok szerint történjen. Véletlen mintaszintű felosztás esetén az egymáshoz közeli időpontok könnyen egyszerre kerülnek tanító és teszt adathalmazba, ami túl optimista eredményt adhat.
+
+\section{PINN architektúra és veszteségfüggvény}
+
+\subsection{Hálózati felépítés}
+
+Egy kezdeti, MATLAB-ban automatikus deriválással tanítható architektúra teljesen összekapcsolt, sima aktivációjú (például $\tanh$) hálózat. Az egyetlen kísérlet időfüggvényeit a hálózat:
+\begin{equation}
+  f_{\vect{\phi}}(t)\longrightarrow
+  \begin{bmatrix}
+    \hat{i}(t)&\hat{\omega}(t)&\hat{\theta}(t)
+  \end{bmatrix}^{\mathsf T}
+  \label{eq:network}
+\end{equation}
+alakban közelíti, ahol $\vect{\phi}$ a tanítható hálózati paraméterek halmaza. A tanulás során automatikus deriválással előáll:
+$\dot{\hat{i}}$, $\dot{\hat{\omega}}$ és $\dot{\hat{\theta}}$.
+
+Egyetlen ismert gerjesztésű futamnál a bemenet lehet a normalizált idő; a mért vagy előírt $u_a(t)$ és $M_L(t)$ a fizikai maradék számításakor, a kollokációs pontokban kerül kiértékelésre. Több eltérő gerjesztés közös tanításánál a hálózatnak a futamot vagy gerjesztést is meg kell különböztetnie: ehhez használható kísérletazonosítóhoz tartozó tanulható embedding, gerjesztés-leíró paraméterek vagy külön hálózat futamonként. Önmagában a pillanatnyi feszültségérték nem mindig írja le az állapot múltját, így nem helyettesíti automatikusan a bemeneti trajektóriát és a kezdeti feltételeket.
+
+Inverz feladatnál a kiválasztott fizikai paraméterek globális tanítható változóként kerülnek a modellbe. Ismeretlen terhelés esetén kiegészítő kimenet becsülheti $\hat{M}_L(t)$-t. A hálózat mélysége és szélessége hiperparaméter, nem fizikai adottság; kis, stabil modellről érdemes indulni, majd validáció alapján bővíteni.
+
+\subsection{Fizikai maradékok}
+
+Az elektromos, mechanikai és kinematikai egyenletek becsült maradékai:
+\begin{align}
+  r_e(t) &=
+  u_a(t)-R\hat{i}(t)-L\dot{\hat{i}}(t)-k_e\hat{\omega}(t),
+  \label{eq:re}\\
+  r_m(t) &=
+  J\dot{\hat{\omega}}(t)-k_t\hat{i}(t)
+      +b\hat{\omega}(t)+\hat{M}_L(t),
+  \label{eq:rm}\\
+  r_{\theta}(t) &= \dot{\hat{\theta}}(t)-\hat{\omega}(t).
+  \label{eq:rtheta}
+\end{align}
+Ha az elektromos mennyiségek gyors és a mechanikai mennyiségek lassú időskálán változnak, a kollokációs pontokat is megfelelően sűrűn kell elosztani; a lépésközt a mintavétel és a várható elektromos időállandó $\tau_e=L/R$ alapján kell megválasztani.
+
+\subsection{Teljes veszteség}
+
+Legyen $\mathcal{D}$ a mérések, $\mathcal{C}$ a kollokációs időpontok és $\mathcal{I}$ a kezdeti feltételek halmaza. A mérési veszteség csak a ténylegesen megfigyelt jelekre számítandó:
+\begin{equation}
+  \mathcal{L}_{\mathrm{data}} =
+  \frac{1}{N_d}\sum_{j\in\mathcal{D}}\sum_{q\in\mathcal{Q}_j}
+  w_q\left(
+    \frac{\hat{y}_{q}(t_j)-y_{q,j}}{s_q}
+  \right)^2,
+  \label{eq:ldata}
+\end{equation}
+ahol $\mathcal{Q}_j$ a $t_j$ időpontban megfigyelt jelek halmaza, $s_q$ pedig a mértékegység- és nagyságrend-normalizáláshoz használt skála. A fizikai veszteség:
+\begin{equation}
+\begin{aligned}
+  \mathcal{L}_{e} &=
+  \frac{1}{N_c}\sum_{t_j\in\mathcal{C}}
+    \left(\frac{r_e(t_j)}{s_e}\right)^2,\\
+  \mathcal{L}_{m} &=
+  \frac{1}{N_c}\sum_{t_j\in\mathcal{C}}
+    \left(\frac{r_m(t_j)}{s_m}\right)^2,\\
+  \mathcal{L}_{\theta} &=
+  \frac{1}{N_c}\sum_{t_j\in\mathcal{C}}
+    \left(\frac{r_{\theta}(t_j)}{s_{\dot{\theta}}}\right)^2,\\
+  \mathcal{L}_{\mathrm{phys}} &= \mathcal{L}_e+\mathcal{L}_m+\mathcal{L}_{\theta}.
+\end{aligned}
+\label{eq:lphys}
+\end{equation}
+Az $s_e,s_m,s_{\dot{\theta}}$ maradékskálák rendre feszültség-, nyomaték- és szögsebesség-dimenziójúak. A normalizálás azért szükséges, mert a különböző fizikai egyenletek numerikus nagyságrendje eltérhet.
+
+A kezdeti feltételek vesztesége például
+\begin{equation}
+  \mathcal{L}_{\mathrm{IC}}=
+  \left(\frac{\hat{i}(t_0)-i_0}{s_i}\right)^2+
+  \left(\frac{\hat{\omega}(t_0)-\omega_0}{s_\omega}\right)^2+
+  \left(\frac{\hat{\theta}(t_0)-\theta_0}{s_\theta^{(0)}}\right)^2.
+\end{equation}
+A teljes célfüggvény:
+\begin{equation}
+\boxed{
+  \mathcal{L}=
+  \lambda_d\mathcal{L}_{\mathrm{data}}+
+  \lambda_e\mathcal{L}_{e}+
+  \lambda_m\mathcal{L}_{m}+
+  \lambda_{\theta}\mathcal{L}_{\theta}+
+  \lambda_0\mathcal{L}_{\mathrm{IC}}+
+  \lambda_M\mathcal{L}_{\mathrm{load}}+
+  \lambda_p\mathcal{L}_{\mathrm{prior}}.
+}
+\label{eq:loss}
+\end{equation}
+Az egyenletmaradékok külön jelölése az egyes tagok súlyának hangolását teszi lehetővé. $\mathcal{L}_{\mathrm{load}}$ csak akkor használatos, ha a terhelés időfüggvényére indokolt simasági vagy szakaszonkénti prior; $\mathcal{L}_{\mathrm{prior}}$ ismert adatlapértékek vagy fizikai korlátok gyenge priorját jelölheti. A $\lambda$ súlyokat és a skálákat validáció alapján kell rögzíteni. Zajos mérésnél négyzetes hiba helyett vagy mellett robusztus Huber-veszteség is vizsgálható.
+
+\section{Ötlépcsős projektterv}
+
+\begin{enumerate}[label=\textbf{\arabic*.},leftmargin=*]
+  \item \textbf{Alapmodell és előreirányú feladat.}
+  Ismert paraméterekkel tanítsuk meg a PINN-t az áram és a szögsebesség, majd a pozíció előrejelzésére. Először szimulált, teljes állapotadatot használjunk, és hasonlítsuk össze közvetlen numerikus ODE-megoldással.
+
+  \item \textbf{Inverz feladat és paraméterazonosítás.}
+  Ismert szimulációs gerjesztés mellett válasszunk ki kevés, azonosíthatónak tűnő paramétert (például $R,L$ vagy $J,b$), és becsüljük őket az állapotokkal együtt. Ezután ismételjük meg olyan kísérleten, ahol a paraméter referenciaértéke nem volt a tanítás része.
+
+  \item \textbf{Ritka mérések és állapotbecslés.}
+  A mérési pontok 10, 25, 50 és 100 százalékát felhasználva vizsgáljuk az áram-, sebesség- és pozícióbecslést. A pontok alulmintavételezését rögzített véletlen maggal vagy szabályos ritkítással tegyük reprodukálhatóvá.
+
+  \item \textbf{Ismeretlen terhelés becslése.}
+  A paramétereket először rögzítve rekonstruáljunk ismert, változó szimulációs terhelést. Csak ennek sikeres validálása után vizsgáljuk néhány paraméter és a terhelés együttes becslését.
+
+  \item \textbf{Robusztusság és általánosítás.}
+  Teszteljünk mérési zajt, ritkább mintavételezést, kisebb paramétereltérést, modellhibát és a tanításban nem látott bemeneti profilokat. Tartsunk külön, teljes futamokból álló teszthalmazt.
+\end{enumerate}
+
+Minden lépcsőben legyen dokumentált referencia, tanítóadat, validációs módszer és rögzített eredmény. A bonyolultabb feladatot csak akkor érdemes elkezdeni, ha az előző szint numerikusan és fizikailag ellenőrizhető eredményt ad.
+
+\section{Validációs metrikák és összehasonlítás}
+
+Minden kimenetre külön jelentsük a gyök-középnégyzetes hibát és az átlagos abszolút hibát:
+\begin{align}
+  \RMSE_y &= \sqrt{\frac{1}{N}\sum_{j=1}^{N}(\hat{y}_j-y_j)^2},\\
+  \MAE_y &= \frac{1}{N}\sum_{j=1}^{N}|\hat{y}_j-y_j|.
+\end{align}
+Az áramra, sebességre, pozícióra és terhelőnyomatékra a mértékegységgel együtt kell közölni az eredményt. Kiegészítésként használható normalizált RMSE (a teszthalmaz szórásával vagy előre rögzített fizikai tartománnyal osztva), illetve $R^2$, de egyetlen összesített szám ne fedje el az egyes állapotok hibáját.
+
+A fizikai konzisztencia méréséhez a tesztidőpontokban jelentsük az elektromos és mechanikai maradékok eredeti mértékegységű RMS-értékét. Paraméterazonosításnál jelentsük a relatív paraméterhibát:
+\[
+  \varepsilon_p =
+  \frac{|\hat{p}-p_{\mathrm{ref}}|}{|p_{\mathrm{ref}}|}\,100\%.
+\]
+A terhelésbecsléshez külön $M_L$-MAE és -RMSE, ritka mérésnél pedig a megfigyelési arányt is közöljük.
+
+Minimum összehasonlítások: (i) hagyományos adatvezérelt neurális hálózat; (ii) PINN sűrű méréssel; (iii) PINN ritka méréssel; (iv) numerikus fizikai modell, ha paraméterei ismertek. Azonos adatfelosztást és tesztfutamokat kell használni. A tanító-, validációs és teszthalmazt teljes kísérleti futam szerint célszerű szétválasztani, és az eredményt több tanítási magon is ellenőrizni.
+
+\section{Fő kihívások és kockázatkezelés}
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.29\textwidth} >{\raggedright\arraybackslash}p{0.62\textwidth}}
+\toprule
+Kihívás & Kezelési mód \\
+\midrule
+\endhead
+Paraméterek azonosíthatósága & Gerjesztés- és paraméterérzékenységi vizsgálat; becsült paraméterek számának korlátozása; ismert adatlapértékek rögzítése vagy prior használata.\\
+PWM és kapocsfeszültség & A PWM parancsot ne azonosítsuk automatikusan $u_a$-val; ellenőrizzük a tápfeszültséget, a meghajtót és az elérhető feszültségmérést.\\
+Eltérő időskálák & Normalizáljuk az időt és az állapotokat; ellenőrizzük a kollokációs pontok sűrűségét és a veszteségtagok nagyságrendjét.\\
+Zajos deriváltak & Ne véges differenciával becsüljük közvetlenül a zajos fordulatszám deriváltját; használjuk a hálózat automatikus deriválását, és ellenőrizzük a fizikai maradékot.\\
+Terhelés és súrlódás összemosódása & Előbb külön kalibráljuk a súrlódást, majd ismert szimulált terhelésen teszteljük a terhelésbecslést.\\
+Szimuláció--mérés eltérés & A szintetikus és mért eredményt külön jelentsük; dokumentáljuk az érzékelőszűrést, késleltetést, telítést és az egyszerűsített modellből eredő hibát.\\
+Túl optimista teszt & Időpontok véletlen keverése helyett teljes kísérleti futamokat tartsunk vissza; ne hangoljunk a teszthalmaz alapján.\\
+\bottomrule
+\end{longtable}
+
+\section{Reprodukálhatóság és javasolt munkatermékek}
+
+A projekt minden futása rögzítse a forrásadat verzióját és licencét, a fájlok ellenőrzött listáját, az egységkonverziókat, a bemeneti profilokat, a kezdeti feltételeket, a paramétereket, a mintavételezést, az adatfelosztást, a hálózati konfigurációt, a veszteségsúlyokat és a véletlen magot. A becsléseket eredeti fizikai mértékegységben is mentsük.
+
+A végső projektcsomag minimális elemei:
+\begin{itemize}
+  \item MATLAB/Simulink referencia- és adatgeneráló modell;
+  \item adatbetöltő és előfeldolgozó szkript egység- és jelnév-ellenőrzéssel;
+  \item PINN tanító kód külön konfigurációval az öt lépcsőhöz;
+  \item reprodukálható tesztkiértékelés és összehasonlító táblázatok;
+  \item rövid adatlap a feltevésekről, sikertelen futásokról és korlátokról.
+\end{itemize}
+
+\begin{thebibliography}{9}
+\bibitem{mendeley}
+A. Von Chong és D. Cardenas,
+\emph{Dataset for an end-to-end open-source DC motor control workflow: current calibration, system identification, and controller validation},
+Mendeley Data, 2. verzió, 2026. szeptember 6.,
+DOI: \href{https://doi.org/10.17632/5xvg43r9r8.2}{10.17632/5xvg43r9r8.2}.
+Adatbázis-rekord: \url{https://data.mendeley.com/datasets/5xvg43r9r8/2}.
+Hozzáférés dátuma: 2026. november 3.
+\end{thebibliography}
+
+\vfill
+\begin{center}
+\color{navy}\rule{0.65\textwidth}{0.5pt}\\
+\textit{A dokumentum projektterv; a konkrét motorparaméterek, mérési jelek és üzemi korlátok kiválasztása külön adatellenőrzési lépést igényel.}
+\end{center}
+
+\end{document}
